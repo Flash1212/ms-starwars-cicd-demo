@@ -1,0 +1,102 @@
+---
+# The name which will appear in Actions
+name: NodeJS Pipeline
+
+on: # How we start the job.
+  pull_request: #Run when PR is opened, reopened or synchronized
+    branches:
+      - dev
+      - main
+    types:
+      - opened
+      - reopened
+      - synchronize
+
+  # workflow_dispatch will all us to trigger a workflow on-demand.
+  # Trigger the GitHub API, GitHub CLI, or GitHub browser interface
+  workflow_dispatch:
+    inputs:
+      DRY_RUN:
+        default: false
+        description: DRY RUN - If checked will mock deploy image and mock open
+          pull request.
+        required: false
+        type: boolean
+      ENV:
+        default: dev
+        description: ENVIRONMENT - The environment to deploy to.
+        required: false
+        type: string
+      FORCE_PUBLISH:
+        default: false
+        description: FORCE DEPLOYMENT - If checked forces publish & pull request
+          opening of select REF, be it branch or tag.
+        required: false
+        type: boolean
+      PUBLISH_TO:
+        default: docker
+        description: PUBLISH TO - Whether this will publish an image to
+          Container Registry or publish as a package to GitHub Packages.
+        options:
+          - docker
+          - package
+        required: true
+        type: choice
+env:
+  DRY_RUN: ${{ inputs.DRY_RUN || false }}
+  ENV: ${{ inputs.ENV || 'dev' }}
+  # The PUBLISH key is your trigger to determines whether or not the build will
+  # be considered for deployment. It is a boolean string. That's because
+  # the env context is natively a string. So, even booleans become strings.
+  # This can be whatever you want it to be. Currently it's set to identify if
+  # the build was initiated via a tag creation (deletion not included).
+  PUBLISH: ${{
+      startsWith(github.ref, 'refs/tags/') ||
+      inputs.FORCE_PUBLISH ||
+      false
+    }}
+  PUBLISH_TO: ${{ inputs.PUBLISH_TO || 'docker' }}
+
+jobs:
+  ## comments:
+  ## NOTE: Include this `setup` job to use the global envs above. GitHub Actions
+  ## does not allow for env(s) to be passed to reusable  workflows. So we work
+  ## around this by returning them from a standard job for later use.
+  setup:
+    name: Setup Pipeline
+    runs-on: ubuntu-latest
+    outputs:
+      WITH_OUTPUT: ${{ steps.setup.outputs.SETUP_JSON }}
+    steps:
+      - name: Setup Environment Variables
+        id: setup
+        run: |
+
+          SETUP_JSON=$(yq \
+            --input-format json \
+            --output-format json \
+            '.' <<< '${{ toJson(env) }}' | \
+            jq --compact-output '.'
+          )
+          echo "::group::Setting environment variables for reusable workflows."
+            jq --color-output '.' <<< "$SETUP_JSON"
+            echo "SETUP_JSON=$SETUP_JSON" >> "$GITHUB_OUTPUT"
+          echo "::endgroup::"
+  ######################################################
+  build-test:
+    # A reusable workflow maintained by Flash1212
+    needs: setup
+    uses: Flash1212/github-actions/.github/workflows/nodejs.yml@main
+    with:
+      ARTIFACT_PATH: build/ # Removing will artifact entire workspace (default)
+      CODE_QL_CONFIG: .github/codeql/codeql-config.yml
+      BUILD_COMMAND: |
+        npm rebuild && npm run prepare --if-present
+      COVERAGE_ANNOTATIONS: all
+      JEST_COVERAGE: true
+      LET_JEST_COVERAGE_RUN_TESTS: true
+      TEST_COMMAND: npm run unit-tests
+      NODE_VERSION: '16'
+      PUBLISH: ${{ fromJson(needs.setup.outputs.WITH_OUTPUT).PUBLISH }}
+      WITH_INPUT: ${{ needs.setup.outputs.WITH_OUTPUT }}
+    secrets: inherit
