@@ -94,7 +94,7 @@ jobs:
         npm rebuild && npm run prepare --if-present
       COVERAGE_ANNOTATIONS: all
       JEST_COVERAGE: true
-      LET_JEST_COVERAGE_RUN_TESTS: true
+      LET_JEST_COVERAGE_RUN_TESTS: false
       TEST_COMMAND: npm run unit-tests
       NODE_VERSION: '16'
       PUBLISH: ${{ fromJson(needs.setup.outputs.WITH_OUTPUT).PUBLISH }}
